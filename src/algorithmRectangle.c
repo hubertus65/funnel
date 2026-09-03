@@ -6,13 +6,6 @@
  *
  * Functions:
  * ----------
- *   createNode: creates new linked list node
- *   addNode: add node to a existing linked list at end
- *   listLen: find length of linked list
- *   getNth: find value of specific node in linked list
- *   getListValues: find values at all the nodes of linked list
- *   lastNodeDeletion: delete last node of the linked list
- *   freeList: free every node of the linked list
  *   calculateLower: find the data set of lower tube curve
  *   calculateUpper: find the data set of upper tube curve
  *   removeLoop: remove points and add intersection points in case of backward order
@@ -44,178 +37,6 @@
 #endif
 
 
-/*
- * Function: createNode
- * --------------------
- *   creates new linked list node
- */
-node_t * createNode(void) {
-  node_t* temp;
-  temp = malloc(sizeof(node_t));
-  if (temp == NULL){
-	  fputs("Error: Failed to allocate memory for temp.\n", stderr);
-    exit(1);
-  }
-  temp->next = NULL;
-  return temp;
-}
-
-/*
- * Function: addNode
- * -----------------
- *   add node to a existing linked list at end
- *
- *   head: original linked list to add additional node at end
- *   newVal: value of the additional node
- *
- *   return: new linked list that have an additional node
- */
-node_t * addNode(node_t* head, double newVal) {
-  node_t* temp;
-  node_t* p;
-  // create additional node
-  temp = createNode();
-  temp->val = newVal;
-
-  if (head == NULL) {
-    head = temp;
-  } else {
-    p = head;
-    while (p->next != NULL) {
-      p = p->next;
-    }
-    p->next = temp;
-  }
-  return head;
-}
-
-/*
- * Function: listLen
- * -----------------
- *   find length of linked list
- *
- *   head: linked list
- *
- *   return: number of nodes in the linked list
- */
-int listLen(node_t* head) {
-  int count = 0;
-  node_t* current = head;  // Initialize current
-  while (current != NULL) {
-    count = count+1;
-    current = current->next;
-  }
-  return count;
-}
-
-/*
- * Function: getNth
- * ----------------
- *   find value of specific node in linked list
- *
- *   head: linked list
- *   index: zero-based index at which node its value will be output
- *
- *   return: value of Nth node of lined list
- */
-double getNth(node_t* head, int index) {
-    node_t* current = head;
-    int count = 0; // the index of the node we're currently looking at
-    while (current != NULL) {
-       if (count == index)
-         break;
-       count = count+1;
-       current = current->next;
-    }
-    return current->val;
-}
-
-/*
- * Function: getListValues
- * -----------------------
- *   find values at all the nodes of linked list
- *
- *   head: linked list
- *
- *   return: data array storing values of linked list
- */
-double * getListValues(node_t* head) {
-  int size = 1;
-  double *value = malloc(sizeof(double) * size);
-  if (value == NULL){
-	  fputs("Error: Failed to allocate memory for value.\n", stderr);
-    exit(1);
-  }
-  memset(value,0,sizeof(double)*size);
-
-  node_t* current = head;
-  int count = 0;
-  while (current != NULL) {
-    value[count] = current->val;
-    if (count+1 == size) {
-      /* need more space */
-      size += 10;
-      double *value_tmp = realloc(value, sizeof(double)*size);
-      if (value_tmp == NULL) {
-        fputs("Fatal error -- out of memory!\n", stderr);
-        exit(1);
-      }
-      value = value_tmp;
-    }
-    count = count+1;
-    current = current->next;
-  }
-  return value;
-}
-
-/*
- * Function: lastNodeDeletion
- * --------------------------
- *   delete last node of the linked list
- *
- *   head: linked list
- */
-void lastNodeDeletion(node_t* head) {
-  node_t* toDelLast;
-  node_t* preNode;
-    if(head == NULL) {
-        printf("There is no element in the list.");
-    } else {
-      toDelLast = head;
-        preNode = head;
-        /* Traverse to the last node of the list */
-        while(toDelLast->next != NULL) {
-            preNode = toDelLast;
-            toDelLast = toDelLast->next;
-        }
-        if(toDelLast == head) {
-          /* If there is only one item in the list, remove it */
-            head = NULL;
-        } else {
-            /* Disconnects the link of second last node with last node */
-            preNode->next = NULL;
-        }
-        /* Delete the last node */
-        if (toDelLast != NULL) free(toDelLast);
-    }
-}
-
-/*
- * Function: freeList
- * ------------------
- *   free every node of a linked list
- *
- *   head: linked list
- */
-void freeList(node_t* head) {
-  node_t* current = head;
-  while (current != NULL) {
-    node_t* next = current->next;
-    free(current);
-    current = next;
-  }
-}
-
 /* Normalize variable array by variable magnitude */
 void normalize(double *var, size_t length, double var_mag) {
   for (size_t i = 0; i < length; i++) {
@@ -239,6 +60,42 @@ void denormalize(double *var, size_t length, double var_mag) {
 }
 
 /*
+ * Append-only buffer of doubles.
+ * -----------------------------
+ *   The tube outline is built by appending a corner at a time, reading back
+ *   the last two or three entries, and occasionally dropping the last one.
+ *   Holding it in a singly linked list meant addNode walked to the tail on
+ *   every append and listLen/getNth rescanned from the head inside the
+ *   per-reference-point loop, so building the outline cost O(N^2) time. An
+ *   array does all three in O(1) (amortised for the append).
+ *
+ *   `bad` is sticky: once an allocation has failed every further push is a
+ *   no-op, so a caller checks it once at the end instead of at every append.
+ */
+typedef struct {
+  double *v;
+  int n;
+  int cap;
+  int bad;
+} dbuf;
+
+static void dbuf_push(dbuf* b, double val) {
+  if (b->bad) return;
+  if (b->n == b->cap) {
+    int cap = (b->cap > 0) ? (b->cap * 2) : 64;
+    double *v = realloc(b->v, (size_t)cap * sizeof(double));
+    if (v == NULL) {
+      b->bad = 1;
+      return;
+    }
+    b->v = v;
+    b->cap = cap;
+  }
+  b->v[b->n] = val;
+  b->n = b->n + 1;
+}
+
+/*
  * Function: setLower
  * ------------------------
  *   find the data set of lower tube curve
@@ -249,9 +106,9 @@ void denormalize(double *var, size_t length, double var_mag) {
  *   return : data struct defining lower curve of the tube
  */
 struct data getLower(struct data *reference, struct data *tube_size) {
-  struct data lower;
-  node_t *lx = NULL;
-  node_t *ly = NULL;
+  struct data lower = {NULL, NULL, 0};
+  dbuf lx = {NULL, 0, 0, 0};
+  dbuf ly = {NULL, 0, 0, 0};
   size_t i, b;
 
   /* Normalize values and tube size in x direction.
@@ -284,8 +141,8 @@ struct data getLower(struct data *reference, struct data *tube_size) {
   }
 
   // add down left point
-  lx = addNode(lx,(x_norm[b] - tube_x_norm[b]));
-  ly = addNode(ly, (reference->y[b] - tube_size->y[b]));
+  dbuf_push(&lx, (x_norm[b] - tube_x_norm[b]));
+  dbuf_push(&ly, (reference->y[b] - tube_size->y[b]));
 
   if (b+1 < reference->n) {
   	  // slopes of reference curve (initialization)
@@ -297,8 +154,8 @@ struct data getLower(struct data *reference, struct data *tube_size) {
   	  }
   	  if equ(s0, 1) {
   		  // add down right point
-  		  lx = addNode(lx,(x_norm[b] + tube_x_norm[b]));
-  		  ly = addNode(ly, (reference->y[b] - tube_size->y[b]));
+  		  dbuf_push(&lx, (x_norm[b] + tube_x_norm[b]));
+  		  dbuf_push(&ly, (reference->y[b] - tube_size->y[b]));
   	  }
 
   	  // ----- 1.2 Iteration: rectangle with center (x,y) = (reference->x[i], reference->y[i]) -----
@@ -319,44 +176,44 @@ struct data getLower(struct data *reference, struct data *tube_size) {
   		  if (!equ(m0, m1)) {
   			  if (!equ(s0, -1) && !equ(s1, -1)) {
   				  // add down right point
-  				  lx = addNode(lx, (x_norm[i] + tube_x_norm[i]));
-  				  ly = addNode(ly, (reference->y[i] - tube_size->y[i]));
+  				  dbuf_push(&lx, (x_norm[i] + tube_x_norm[i]));
+  				  dbuf_push(&ly, (reference->y[i] - tube_size->y[i]));
   			  } else if (!equ(s0, 1) && !equ(s1, 1)) {
   				  // add down left point
-  				  lx = addNode(lx, (x_norm[i] - tube_x_norm[i]));
-  				  ly = addNode(ly, (reference->y[i] - tube_size->y[i]));
+  				  dbuf_push(&lx, (x_norm[i] - tube_x_norm[i]));
+  				  dbuf_push(&ly, (reference->y[i] - tube_size->y[i]));
   			  } else if (equ(s0, -1) && equ(s1, 1)) {
   				  // add down left point
-  				  lx = addNode(lx, (x_norm[i] - tube_x_norm[i]));
-  				  ly = addNode(ly, (reference->y[i] - tube_size->y[i]));
+  				  dbuf_push(&lx, (x_norm[i] - tube_x_norm[i]));
+  				  dbuf_push(&ly, (reference->y[i] - tube_size->y[i]));
   				  // add down right point
-  				  lx = addNode(lx, (x_norm[i] + tube_x_norm[i]));
-  				  ly = addNode(ly, (reference->y[i] - tube_size->y[i]));
+  				  dbuf_push(&lx, (x_norm[i] + tube_x_norm[i]));
+  				  dbuf_push(&ly, (reference->y[i] - tube_size->y[i]));
   			  } else if (equ(s0, 1) && equ(s1, -1)) {
   				  // add down right point
-  				  lx = addNode(lx, (x_norm[i] + tube_x_norm[i]));
-  				  ly = addNode(ly, (reference->y[i] - tube_size->y[i]));
+  				  dbuf_push(&lx, (x_norm[i] + tube_x_norm[i]));
+  				  dbuf_push(&ly, (reference->y[i] - tube_size->y[i]));
   				  // add down left point
-  				  lx = addNode(lx, (x_norm[i] - tube_x_norm[i]));
-  				  ly = addNode(ly, (reference->y[i] - tube_size->y[i]));
+  				  dbuf_push(&lx, (x_norm[i] - tube_x_norm[i]));
+  				  dbuf_push(&ly, (reference->y[i] - tube_size->y[i]));
   			  }
 
-  			  int len = listLen(ly);
-  			  double lastY = getNth(ly, len-1);
+  			  int len = ly.n;
+  			  double lastY = ly.v[len-1];
   			  // remove the last added points in case of zero slope of tube curve
   			  if equ((reference->y[i+1] - tube_size->y[i+1]), lastY) {
-  				  if (equ(s0 * s1, -1) && equ(getNth(ly, len-3), lastY)) {
+  				  if (equ(s0 * s1, -1) && len >= 3 && equ(ly.v[len-3], lastY)) {
   					  // remove two points, if two points were added at last
   					  // ((len-1) - 2 >= 0, because start point + two added points)
-  					  lastNodeDeletion(lx);
-  					  lastNodeDeletion(ly);
-  					  lastNodeDeletion(lx);
-  					  lastNodeDeletion(ly);
-  				  } else if (!equ(s0 * s1, -1) && equ(getNth(ly, len-2), lastY)) {
+  					  lx.n = lx.n - 1;
+  					  ly.n = ly.n - 1;
+  					  lx.n = lx.n - 1;
+  					  ly.n = ly.n - 1;
+  				  } else if (!equ(s0 * s1, -1) && len >= 2 && equ(ly.v[len-2], lastY)) {
   					  // remove one point, if one point was added at last
   					  // ((len-1) - 1 >= 0, because start point + one added point)
-  					  lastNodeDeletion(lx);
-  					  lastNodeDeletion(ly);
+  					  lx.n = lx.n - 1;
+  					  ly.n = ly.n - 1;
   				  }
   			  }
   		  }
@@ -366,29 +223,31 @@ struct data getLower(struct data *reference, struct data *tube_size) {
   	  // ----- 1.3. End: Rectangle with center (x,y) = (reference->x[reference->n - 1], reference->y[reference->n - 1]) -----
   	  if equ(s0, -1) {
   		  // add down left point
-  		  lx = addNode(lx, (x_norm[reference->n-1] - tube_x_norm[reference->n-1]));
-  		  ly = addNode(ly, (reference->y[reference->n-1] - tube_size->y[reference->n-1]));
+  		  dbuf_push(&lx, (x_norm[reference->n-1] - tube_x_norm[reference->n-1]));
+  		  dbuf_push(&ly, (reference->y[reference->n-1] - tube_size->y[reference->n-1]));
   	  }
   }
   // add down right point
-  lx = addNode(lx, (x_norm[reference->n-1] + tube_x_norm[reference->n-1]));
-  ly = addNode(ly, (reference->y[reference->n-1] - tube_size->y[reference->n-1]));
+  dbuf_push(&lx, (x_norm[reference->n-1] + tube_x_norm[reference->n-1]));
+  dbuf_push(&ly, (reference->y[reference->n-1] - tube_size->y[reference->n-1]));
 
   // ===== 2. Remove points and add intersection points in case of backward order =====
-  int lisLen = listLen(ly);
   /* getListValues allocates its own result; allocating one here and then
      overwriting the pointer leaked it once per call. */
-  double* tempLX = getListValues(lx);
-  double* tempLY = getListValues(ly);
-  /* removeLoop takes ownership of tempLX/tempLY. */
-  lower = removeLoop(tempLX, tempLY, lisLen, -1);
-  denormalize(lower.x, lower.n, dat_char.mag_x);
-
   // Free the memory.
-  freeList(lx);
-  freeList(ly);
   if (x_norm != NULL) free(x_norm);
   if (tube_x_norm != NULL) free(tube_x_norm);
+
+  if (lx.bad || ly.bad) {
+    fputs("Error: Failed to allocate memory for the lower tube curve.\n", stderr);
+    free(lx.v);
+    free(ly.v);
+    return lower;  /* n == 0 signals failure to the caller */
+  }
+
+  /* removeLoop takes ownership of the two buffers. */
+  lower = removeLoop(lx.v, ly.v, ly.n, -1);
+  denormalize(lower.x, lower.n, dat_char.mag_x);
 
   return lower;
 }
@@ -405,9 +264,9 @@ struct data getLower(struct data *reference, struct data *tube_size) {
  *   return : data set defining upper curve of the tube
  */
 struct data getUpper(struct data *reference, struct data *tube_size) {
-  struct data upper;
-  node_t *ux = NULL;
-  node_t *uy = NULL;
+  struct data upper = {NULL, NULL, 0};
+  dbuf ux = {NULL, 0, 0, 0};
+  dbuf uy = {NULL, 0, 0, 0};
   size_t i, b;
 
   /* Normalize values and tube size in x direction.
@@ -439,8 +298,8 @@ struct data getUpper(struct data *reference, struct data *tube_size) {
     b = b+1;
   }
   // add top left point
-  ux = addNode(ux,(x_norm[b] - tube_x_norm[b]));
-  uy = addNode(uy, (reference->y[b] + tube_size->y[b]));
+  dbuf_push(&ux, (x_norm[b] - tube_x_norm[b]));
+  dbuf_push(&uy, (reference->y[b] + tube_size->y[b]));
 
   if (b+1 < reference->n) {
 	  // slopes of reference curve (initialization)
@@ -452,8 +311,8 @@ struct data getUpper(struct data *reference, struct data *tube_size) {
 	  }
 	  if equ(s0, -1) {
 		  // add top right point
-		  ux = addNode(ux, (x_norm[b] + tube_x_norm[b]));
-		  uy = addNode(uy, (reference->y[b] + tube_size->y[b]));
+		  dbuf_push(&ux, (x_norm[b] + tube_x_norm[b]));
+		  dbuf_push(&uy, (reference->y[b] + tube_size->y[b]));
 	  }
 
 	  // ----- 1.2 Iteration: rectangle with center (x,y) = (x_norm[i], reference->y[i]) -----
@@ -474,44 +333,44 @@ struct data getUpper(struct data *reference, struct data *tube_size) {
 		  if (!equ(m0, m1)) {
 			  if (!equ(s0, -1) && !equ(s1, -1)) {
 				  // add top left point
-				  ux = addNode(ux, (x_norm[i] - tube_x_norm[i]));
-				  uy = addNode(uy, (reference->y[i] + tube_size->y[i]));
+				  dbuf_push(&ux, (x_norm[i] - tube_x_norm[i]));
+				  dbuf_push(&uy, (reference->y[i] + tube_size->y[i]));
 			  } else if (!equ(s0, 1) && !equ(s1, 1)) {
 				  // add top right point
-				  ux = addNode(ux, (x_norm[i] + tube_x_norm[i]));
-				  uy = addNode(uy, (reference->y[i] + tube_size->y[i]));
+				  dbuf_push(&ux, (x_norm[i] + tube_x_norm[i]));
+				  dbuf_push(&uy, (reference->y[i] + tube_size->y[i]));
 			  } else if (equ(s0, 1) && equ(s1, -1)) {
 				  // add top left point
-				  ux = addNode(ux, (x_norm[i] - tube_x_norm[i]));
-				  uy = addNode(uy, (reference->y[i] + tube_size->y[i]));
+				  dbuf_push(&ux, (x_norm[i] - tube_x_norm[i]));
+				  dbuf_push(&uy, (reference->y[i] + tube_size->y[i]));
 				  // add top right point
-				  ux = addNode(ux, (x_norm[i] + tube_x_norm[i]));
-				  uy = addNode(uy, (reference->y[i] + tube_size->y[i]));
+				  dbuf_push(&ux, (x_norm[i] + tube_x_norm[i]));
+				  dbuf_push(&uy, (reference->y[i] + tube_size->y[i]));
 			  } else if (equ(s0, -1) && equ(s1, 1)) {
 				  // add top right point
-				  ux = addNode(ux, (x_norm[i] + tube_x_norm[i]));
-				  uy = addNode(uy, (reference->y[i] + tube_size->y[i]));
+				  dbuf_push(&ux, (x_norm[i] + tube_x_norm[i]));
+				  dbuf_push(&uy, (reference->y[i] + tube_size->y[i]));
 				  // add top left point
-				  ux = addNode(ux, (x_norm[i] - tube_x_norm[i]));
-				  uy = addNode(uy, (reference->y[i] + tube_size->y[i]));
+				  dbuf_push(&ux, (x_norm[i] - tube_x_norm[i]));
+				  dbuf_push(&uy, (reference->y[i] + tube_size->y[i]));
 			  }
 
-			  int len = listLen(uy);
-			  double lastY = getNth(uy, len-1);
+			  int len = uy.n;
+			  double lastY = uy.v[len-1];
 			  // remove the last added points in case of zero slope of tube curve
 			  if equ((reference->y[i+1] + tube_size->y[i+1]), lastY) {
-				  if (equ(s0 * s1, -1) && equ(getNth(uy, len-3), lastY)) {
+				  if (equ(s0 * s1, -1) && len >= 3 && equ(uy.v[len-3], lastY)) {
 					  // remove two points, if two points were added at last
 					  // ((len-1) - 2 >= 0, because start point + two added points)
-					  lastNodeDeletion(ux);
-					  lastNodeDeletion(uy);
-					  lastNodeDeletion(ux);
-					  lastNodeDeletion(uy);
-				  } else if (!equ(s0 * s1, -1) && equ(getNth(uy, len-2), lastY)) {
+					  ux.n = ux.n - 1;
+					  uy.n = uy.n - 1;
+					  ux.n = ux.n - 1;
+					  uy.n = uy.n - 1;
+				  } else if (!equ(s0 * s1, -1) && len >= 2 && equ(uy.v[len-2], lastY)) {
 					  // remove one point, if one point was added at last
 					  // ((len-1) - 1 >= 0, because start point + one added point)
-					  lastNodeDeletion(ux);
-					  lastNodeDeletion(uy);
+					  ux.n = ux.n - 1;
+					  uy.n = uy.n - 1;
 				  }
 			  }
 		  }
@@ -521,28 +380,30 @@ struct data getUpper(struct data *reference, struct data *tube_size) {
 	  // ----- 1.3. End: Rectangle with center (x,y) = (x_norm[reference->n - 1], reference->y[reference->n - 1]) -----
 	  if equ(s0, 1) {
 		  // add top left point
-		  ux = addNode(ux, (x_norm[reference->n-1] - tube_x_norm[reference->n-1]));
-		  uy = addNode(uy, (reference->y[reference->n-1] + tube_size->y[reference->n-1]));
+		  dbuf_push(&ux, (x_norm[reference->n-1] - tube_x_norm[reference->n-1]));
+		  dbuf_push(&uy, (reference->y[reference->n-1] + tube_size->y[reference->n-1]));
 	  }
   }
   // add top right point
-  ux = addNode(ux, (x_norm[reference->n-1] + tube_x_norm[reference->n-1]));
-  uy = addNode(uy, (reference->y[reference->n-1] + tube_size->y[reference->n-1]));
+  dbuf_push(&ux, (x_norm[reference->n-1] + tube_x_norm[reference->n-1]));
+  dbuf_push(&uy, (reference->y[reference->n-1] + tube_size->y[reference->n-1]));
 
   // ===== 2. Remove points and add intersection points in case of backward order =====
-  int lisLen = listLen(uy);
   /* See the matching comment in getLower. */
-  double* tempUX = getListValues(ux);
-  double* tempUY = getListValues(uy);
-  /* removeLoop takes ownership of tempUX/tempUY. */
-  upper = removeLoop(tempUX, tempUY, lisLen, 1);
-  denormalize(upper.x, upper.n, dat_char.mag_x);
-
   // Free the memory.
-  freeList(ux);
-  freeList(uy);
   if (x_norm != NULL) free(x_norm);
   if (tube_x_norm != NULL) free(tube_x_norm);
+
+  if (ux.bad || uy.bad) {
+    fputs("Error: Failed to allocate memory for the upper tube curve.\n", stderr);
+    free(ux.v);
+    free(uy.v);
+    return upper;  /* n == 0 signals failure to the caller */
+  }
+
+  /* removeLoop takes ownership of the two buffers. */
+  upper = removeLoop(ux.v, uy.v, uy.n, 1);
+  denormalize(upper.x, upper.n, dat_char.mag_x);
 
   return upper;
 }
