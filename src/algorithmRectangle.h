@@ -25,6 +25,8 @@ double * getListValues(node_t* head);
 
 void lastNodeDeletion(node_t* head);
 
+void freeList(node_t* head);
+
 struct data getLower(struct data *reference, struct data *tube_size);
 
 struct data getUpper(struct data *reference, struct data *tube_size);

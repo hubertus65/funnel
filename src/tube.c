@@ -194,5 +194,9 @@ int validate(
     double *newLower = interpolateValues(lower.x, lower.y, lower.n, test.x, test.n);
     double *newUpper = interpolateValues(upper.x, upper.y, upper.n, test.x, test.n);
     int retVal = compare(newLower, newUpper, test.n, test.y, test.x, test.n, err);
+    /* interpolateValues returns its own buffer, except in the degenerate case
+       where it hands back the source pointer -- which the caller still owns. */
+    if (newLower != lower.y) free(newLower);
+    if (newUpper != upper.y) free(newUpper);
     return retVal;
 }

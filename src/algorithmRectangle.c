@@ -12,6 +12,7 @@
  *   getNth: find value of specific node in linked list
  *   getListValues: find values at all the nodes of linked list
  *   lastNodeDeletion: delete last node of the linked list
+ *   freeList: free every node of the linked list
  *   calculateLower: find the data set of lower tube curve
  *   calculateUpper: find the data set of upper tube curve
  *   removeLoop: remove points and add intersection points in case of backward order
@@ -199,6 +200,22 @@ void lastNodeDeletion(node_t* head) {
     }
 }
 
+/*
+ * Function: freeList
+ * ------------------
+ *   free every node of a linked list
+ *
+ *   head: linked list
+ */
+void freeList(node_t* head) {
+  node_t* current = head;
+  while (current != NULL) {
+    node_t* next = current->next;
+    free(current);
+    current = next;
+  }
+}
+
 /* Normalize variable array by variable magnitude */
 void normalize(double *var, size_t length, double var_mag) {
   for (size_t i = 0; i < length; i++) {
@@ -359,23 +376,17 @@ struct data getLower(struct data *reference, struct data *tube_size) {
 
   // ===== 2. Remove points and add intersection points in case of backward order =====
   int lisLen = listLen(ly);
-  double* tempLX = malloc(lisLen * sizeof(double));
-  if (tempLX == NULL){
-  	  fputs("Error: Failed to allocate memory for tempLX.\n", stderr);
-      exit(1);
-  }
-  double* tempLY = malloc(lisLen * sizeof(double));
-  if (tempLY == NULL){
-  	  fputs("Error: Failed to allocate memory for tempLY.\n", stderr);
-      exit(1);
-  }
-
-  tempLX = getListValues(lx);
-  tempLY = getListValues(ly);
+  /* getListValues allocates its own result; allocating one here and then
+     overwriting the pointer leaked it once per call. */
+  double* tempLX = getListValues(lx);
+  double* tempLY = getListValues(ly);
+  /* removeLoop takes ownership of tempLX/tempLY. */
   lower = removeLoop(tempLX, tempLY, lisLen, -1);
   denormalize(lower.x, lower.n, dat_char.mag_x);
 
   // Free the memory.
+  freeList(lx);
+  freeList(ly);
   if (x_norm != NULL) free(x_norm);
   if (tube_x_norm != NULL) free(tube_x_norm);
 
@@ -520,23 +531,16 @@ struct data getUpper(struct data *reference, struct data *tube_size) {
 
   // ===== 2. Remove points and add intersection points in case of backward order =====
   int lisLen = listLen(uy);
-  double* tempUX = malloc(lisLen * sizeof(double));
-  if (tempUX == NULL){
-	  fputs("Error: Failed to allocate memory for tempUX.\n", stderr);
-      exit(1);
-  }
-  double* tempUY = malloc(lisLen * sizeof(double));
-  if (tempUY == NULL){
-  	  fputs("Error: Failed to allocate memory for tempUY.\n", stderr);
-      exit(1);
-  }
-
-  tempUX = getListValues(ux);
-  tempUY = getListValues(uy);
+  /* See the matching comment in getLower. */
+  double* tempUX = getListValues(ux);
+  double* tempUY = getListValues(uy);
+  /* removeLoop takes ownership of tempUX/tempUY. */
   upper = removeLoop(tempUX, tempUY, lisLen, 1);
   denormalize(upper.x, upper.n, dat_char.mag_x);
 
   // Free the memory.
+  freeList(ux);
+  freeList(uy);
   if (x_norm != NULL) free(x_norm);
   if (tube_x_norm != NULL) free(tube_x_norm);
 
@@ -673,46 +677,25 @@ struct data getUpper(struct data *reference, struct data *tube_size) {
 
        // ===== 3. Delete points i until (including) k-1 =====
        int count = k-i;
-       double* XX = malloc((re_size-count) * sizeof(double));
-       if (XX == NULL){
-    	   fputs("Error: Failed to allocate memory for XX.\n", stderr);
-           exit(1);
-       }
-       XX = removeRange(X, re_size, i, count);
-       double* YY = malloc((size-count) * sizeof(double));
-       if (YY == NULL){
-           fputs("Error: Failed to allocate memory for YY.\n", stderr);
-           exit(1);
-       }
-       YY = removeRange(Y, re_size, i, count);
+       /* removeRange allocates the result and exits on failure, so no
+          allocation of its own is needed here. Allocating one and then
+          overwriting the pointer with removeRange's result leaked it once
+          per loop removal, which is where the quadratic memory came from. */
+       double* XX = removeRange(X, re_size, i, count);
+       double* YY = removeRange(Y, re_size, i, count);
        re_size = re_size-count;
        // ===== 4. Add intersection point =====
        // add intersection point, if it isn't already there
        if (addPoint && (!equ(XX[i], ix) || !equ(YY[i], iy))) {
          re_size = re_size+1;
-         double *X_temp = malloc(re_size * sizeof(double));
-         if (X_temp == NULL){
-        	 fputs("Error: Failed to allocate memory for X_temp.\n", stderr);
-             exit(1);
-         }
-         double *Y_temp = malloc(re_size * sizeof(double));
-         if (Y_temp == NULL){
-        	 fputs("Error: Failed to allocate memory for Y_temp.\n", stderr);
-        	 exit(1);
-         }
-         X_temp = insertAt(XX, re_size-1, i, ix);
-         Y_temp = insertAt(YY, re_size-1, i, iy);
-
-         XX = realloc(XX, sizeof(double)*re_size);
-         if (XX == NULL){
-        	 fputs("Error: Failed to reallocate memory for XX.\n", stderr);
-        	 exit(1);
-         }
-         YY = realloc(YY, sizeof(double)*re_size);
-         if (YY == NULL){
-        	 fputs("Error: Failed to reallocate memory for YY.\n", stderr);
-        	 exit(1);
-         }
+         /* insertAt returns a freshly allocated array; the previous XX/YY are
+            dead as soon as it returns. The realloc that used to sit here only
+            resized a block that was then overwritten by X_temp/Y_temp, so it
+            leaked the block instead of freeing it. */
+         double *X_temp = insertAt(XX, re_size-1, i, ix);
+         double *Y_temp = insertAt(YY, re_size-1, i, iy);
+         free(XX);
+         free(YY);
          XX = X_temp;
          YY = Y_temp;
        }
@@ -723,43 +706,20 @@ struct data getUpper(struct data *reference, struct data *tube_size) {
        // ===== 6. Delete points that are doubled =====
        if (equ(XX[i-1], XX[i]) && equ(YY[i-1], YY[i])) {
          re_size = re_size-1;
-         double *X_temp = malloc(re_size * sizeof(double));
-         if (X_temp == NULL){
-        	 fputs("Error: Failed to allocate memory for X_temp.\n", stderr);
-        	 exit(1);
-         }
-         double *Y_temp = malloc(re_size * sizeof(double));
-         if (Y_temp == NULL){
-        	 fputs("Error: Failed to allocate memory for Y_temp.\n", stderr);
-        	 exit(1);
-         }
-         X_temp = removeAt(XX, re_size+1, i);
-         Y_temp = removeAt(YY, re_size+1, i);
-
-         XX = realloc(XX, sizeof(double)*re_size);
-         if (XX == NULL){
-        	 fputs("Error: Failed to reallocate memory for XX.\n", stderr);
-        	 exit(1);
-         }
-         YY = realloc(YY, sizeof(double)*re_size);
-         if (YY == NULL){
-        	 fputs("Error: Failed to reallocate memory for YY.\n", stderr);
-        	 exit(1);
-         }
+         /* Same pattern as the insertAt block above. */
+         double *X_temp = removeAt(XX, re_size+1, i);
+         double *Y_temp = removeAt(YY, re_size+1, i);
+         free(XX);
+         free(YY);
          XX = X_temp;
          YY = Y_temp;
          j = i - 1;
        }
-       X = realloc(X, sizeof(double)*re_size);
-       if (X == NULL){
-    	   fputs("Error: Failed to reallocate memory for X.\n", stderr);
-    	   exit(1);
-       }
-       Y = realloc(Y, sizeof(double)*re_size);
-       if (Y == NULL){
-    	   fputs("Error: Failed to reallocate memory for Y.\n", stderr);
-    	   exit(1);
-       }
+       /* X/Y are superseded by XX/YY. removeLoop owns the arrays it was
+          handed (both callers drop their pointer at the call), so the old
+          ones are freed here rather than resized and then leaked. */
+       free(X);
+       free(Y);
        X = XX;
        Y = YY;
      }

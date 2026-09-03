@@ -197,6 +197,11 @@ int compareAndReport(
   struct data *baseCSV = newData(nReference);
   struct data *testCSV = newData(nTest);
   struct data *tube_size = newData(nReference);
+  /* Declared here, and zeroed, so that the cleanup at `end` can free them
+     whichever `goto end` was taken. */
+  struct data lowerCurve = {NULL, NULL, 0};
+  struct data upperCurve = {NULL, NULL, 0};
+  struct reports validateReport = {{{NULL, NULL, 0}, {NULL, NULL, 0}}};
   setData(baseCSV, tReference, yReference);
   setData(testCSV, tTest, yTest);
 
@@ -229,8 +234,8 @@ int compareAndReport(
   set_tube_size(tube_size, baseCSV, tolerances);
 
   // Calculate values of lower and upper curve around base
-  struct data lowerCurve = getLower(baseCSV, tube_size);
-  struct data upperCurve = getUpper(baseCSV, tube_size);
+  lowerCurve = getLower(baseCSV, tube_size);
+  upperCurve = getUpper(baseCSV, tube_size);
 
   // Validate test curve and generate error report
   if (lowerCurve.n == 0 || lowerCurve.n == 0){
@@ -238,8 +243,6 @@ int compareAndReport(
     retVal = 1;
     goto end;
   }
-  struct reports validateReport;
-
   retVal = validate(lowerCurve, upperCurve, *testCSV, &validateReport.errors);
   if (retVal != 0){
     fputs("Error: Failed to run validate function.\n", log_file);
@@ -277,6 +280,17 @@ int compareAndReport(
     freeData(baseCSV);
     freeData(testCSV);
     freeData(tube_size);
+    /* getLower/getUpper and validate hand back heap arrays that nothing else
+       owns; without these the whole per-call working set stayed allocated for
+       the lifetime of the process that loaded the library. */
+    if (lowerCurve.x != NULL) free(lowerCurve.x);
+    if (lowerCurve.y != NULL) free(lowerCurve.y);
+    if (upperCurve.x != NULL) free(upperCurve.x);
+    if (upperCurve.y != NULL) free(upperCurve.y);
+    if (validateReport.errors.original.x != NULL) free(validateReport.errors.original.x);
+    if (validateReport.errors.original.y != NULL) free(validateReport.errors.original.y);
+    if (validateReport.errors.diff.x != NULL) free(validateReport.errors.diff.x);
+    if (validateReport.errors.diff.y != NULL) free(validateReport.errors.diff.y);
     fclose(log_file);
     return retVal;
 }
