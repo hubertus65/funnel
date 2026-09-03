@@ -1,30 +1,6 @@
 #include <math.h>
 #include "compare.h"
 
-#ifndef equ
-#define equ(a,b) (fabs((a)-(b)) < 1e-10 ? true : false)  /* (b) required by Win32 compiler for <0 values */
-#endif
-
-/*
- * Function: equ_scaled
- * --------------------
- *   compare two x values for equality, relative to their magnitude
- *
- *   equ() is an absolute 1e-10. For x of a large order of magnitude -- a year
- *   in seconds is 3.15e7, where a double's ulp is about 4e-9 -- no two
- *   distinct doubles can satisfy it, and even a value compared with itself
- *   after a round trip through normalisation fails. Endpoints that are in fact
- *   identical were then reported as different and the comparison refused.
- *
- *   Scaling by the larger magnitude keeps the tolerance at a constant ~1e-10
- *   relative, which is what the absolute form already meant for x values of
- *   order one. Below magnitude one the behaviour is unchanged.
- */
-static bool equ_scaled(double a, double b) {
-  double mag = fabs(a) > fabs(b) ? fabs(a) : fabs(b);
-  return fabs(a - b) <= 1e-10 * (mag > 1.0 ? mag : 1.0);
-}
-
 /*
 *   Descriptor of the file used for logging the numerical processing errors
 *   (all other errors like memory, file access, bad argument...
@@ -250,12 +226,12 @@ int compareAndReport(
     log_file = stderr;
   }
 
-  if (!equ_scaled(baseCSV->x[0], testCSV->x[0])){
+  if (!equ(baseCSV->x[0], testCSV->x[0])){
     fprintf(log_file, "Error: Reference and test data minimum x values are different.\n");
     retVal = 1;
     goto end;
   }
-  if (!equ_scaled(baseCSV->x[baseCSV->n - 1], testCSV->x[testCSV->n - 1])){
+  if (!equ(baseCSV->x[baseCSV->n - 1], testCSV->x[testCSV->n - 1])){
     fprintf(log_file, "Error: Reference and test data maximum x values are different.\n");
     retVal = 1;
     goto end;

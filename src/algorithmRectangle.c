@@ -28,10 +28,6 @@
 #define sign(a) (((a)>0) ? 1 : (((a)<0) ? -1 : 0))
 #endif
 
-#ifndef equ
-#define equ(a,b) (fabs((a)-(b)) < 1e-10 ? true : false)  /* (b) required by Win32 compiler for <0 values */
-#endif
-
 #if defined(_MSC_VER)
 #define inline __inline
 #endif
@@ -154,7 +150,7 @@ struct data getLower(struct data *reference, struct data *tube_size) {
   	  } else {
   		  m0 = (s0>0) ? 1e+15 : -1e+15;
   	  }
-  	  if equ(s0, 1) {
+  	  if (equ(s0, 1)) {
   		  // add down right point
   		  dbuf_push(&lx, (x_norm[b] + tube_x_norm[b]));
   		  dbuf_push(&ly, (reference->y[b] - tube_size->y[b]));
@@ -207,7 +203,7 @@ struct data getLower(struct data *reference, struct data *tube_size) {
   			  int len = ly.n;
   			  double lastY = ly.v[len-1];
   			  // remove the last added points in case of zero slope of tube curve
-  			  if equ((reference->y[i+1] - tube_size->y[i+1]), lastY) {
+  			  if (equ((reference->y[i+1] - tube_size->y[i+1]), lastY)) {
   				  if (equ(s0 * s1, -1) && len >= 3 && equ(ly.v[len-3], lastY)) {
   					  // remove two points, if two points were added at last
   					  // ((len-1) - 2 >= 0, because start point + two added points)
@@ -227,7 +223,7 @@ struct data getLower(struct data *reference, struct data *tube_size) {
   		  m0 = m1;
   	  }
   	  // ----- 1.3. End: Rectangle with center (x,y) = (reference->x[reference->n - 1], reference->y[reference->n - 1]) -----
-  	  if equ(s0, -1) {
+  	  if (equ(s0, -1)) {
   		  // add down left point
   		  dbuf_push(&lx, (x_norm[reference->n-1] - tube_x_norm[reference->n-1]));
   		  dbuf_push(&ly, (reference->y[reference->n-1] - tube_size->y[reference->n-1]));
@@ -238,8 +234,6 @@ struct data getLower(struct data *reference, struct data *tube_size) {
   dbuf_push(&ly, (reference->y[reference->n-1] - tube_size->y[reference->n-1]));
 
   // ===== 2. Remove points and add intersection points in case of backward order =====
-  /* getListValues allocates its own result; allocating one here and then
-     overwriting the pointer leaked it once per call. */
   // Free the memory.
   if (x_norm != NULL) free(x_norm);
   if (tube_x_norm != NULL) free(tube_x_norm);
@@ -317,7 +311,7 @@ struct data getUpper(struct data *reference, struct data *tube_size) {
 	  } else {
 		  m0 = (s0>0) ? 1e+15 : -1e+15;
 	  }
-	  if equ(s0, -1) {
+	  if (equ(s0, -1)) {
 		  // add top right point
 		  dbuf_push(&ux, (x_norm[b] + tube_x_norm[b]));
 		  dbuf_push(&uy, (reference->y[b] + tube_size->y[b]));
@@ -370,7 +364,7 @@ struct data getUpper(struct data *reference, struct data *tube_size) {
 			  int len = uy.n;
 			  double lastY = uy.v[len-1];
 			  // remove the last added points in case of zero slope of tube curve
-			  if equ((reference->y[i+1] + tube_size->y[i+1]), lastY) {
+			  if (equ((reference->y[i+1] + tube_size->y[i+1]), lastY)) {
 				  if (equ(s0 * s1, -1) && len >= 3 && equ(uy.v[len-3], lastY)) {
 					  // remove two points, if two points were added at last
 					  // ((len-1) - 2 >= 0, because start point + two added points)
@@ -390,7 +384,7 @@ struct data getUpper(struct data *reference, struct data *tube_size) {
 		  m0 = m1;
 	  }
 	  // ----- 1.3. End: Rectangle with center (x,y) = (x_norm[reference->n - 1], reference->y[reference->n - 1]) -----
-	  if equ(s0, 1) {
+	  if (equ(s0, 1)) {
 		  // add top left point
 		  dbuf_push(&ux, (x_norm[reference->n-1] - tube_x_norm[reference->n-1]));
 		  dbuf_push(&uy, (reference->y[reference->n-1] + tube_size->y[reference->n-1]));
@@ -401,7 +395,6 @@ struct data getUpper(struct data *reference, struct data *tube_size) {
   dbuf_push(&uy, (reference->y[reference->n-1] + tube_size->y[reference->n-1]));
 
   // ===== 2. Remove points and add intersection points in case of backward order =====
-  /* See the matching comment in getLower. */
   // Free the memory.
   if (x_norm != NULL) free(x_norm);
   if (tube_x_norm != NULL) free(tube_x_norm);
@@ -520,12 +513,12 @@ struct data getUpper(struct data *reference, struct data *tube_size) {
          // add no point; check if case occur: slopes have different signs
          addPoint = false;
        // case i-branch vertical
-       else if equ(X[i], X[i - 1]) {
+       else if (equ(X[i], X[i - 1])) {
          ix = X[i];
          iy = Y[k - 1] + ((X[i] - X[k - 1]) * (Y[k] - Y[k - 1])) / (X[k] - X[k - 1]);
        }
        // case k-branch vertical
-       else if equ(X[k], X[k - 1]) {
+       else if (equ(X[k], X[k - 1])) {
          ix = X[k];
          iy = Y[i - 1] + ((X[k] - X[i - 1]) * (Y[i] - Y[i - 1])) / (X[i] - X[i - 1]);
        }
