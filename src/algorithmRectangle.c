@@ -121,7 +121,9 @@ struct data getLower(struct data *reference, struct data *tube_size) {
   double *tube_x_norm = (double *)malloc(sizeof(double) * tube_size->n);  // Normalized tube size in x direction
   if ((x_norm == NULL) || (tube_x_norm == NULL)){
 	  fputs("Error: Failed to allocate memory for x_norm or tube_x_norm.\n", stderr);
-    exit(1);
+    free(x_norm);
+    free(tube_x_norm);
+    return lower;  /* n == 0 signals failure to the caller */
   }
   memcpy(x_norm, reference->x, sizeof(double) * reference->n);
   memcpy(tube_x_norm, tube_size->x, sizeof(double) * tube_size->n);
@@ -198,6 +200,10 @@ struct data getLower(struct data *reference, struct data *tube_size) {
   				  dbuf_push(&ly, (reference->y[i] - tube_size->y[i]));
   			  }
 
+  			  /* An append may have failed, in which case ly.v is still empty and
+  			     the read-back below would be out of bounds. The tail of the
+  			     function reports it. */
+  			  if (lx.bad || ly.bad) break;
   			  int len = ly.n;
   			  double lastY = ly.v[len-1];
   			  // remove the last added points in case of zero slope of tube curve
@@ -279,7 +285,9 @@ struct data getUpper(struct data *reference, struct data *tube_size) {
   double *tube_x_norm = (double *)malloc(sizeof(double) * tube_size->n);  // Normalized tube size in x direction
   if ((x_norm == NULL) || (tube_x_norm == NULL)){
 	  fputs("Error: Failed to allocate memory for x_norm or tube_x_norm.\n", stderr);
-    exit(1);
+    free(x_norm);
+    free(tube_x_norm);
+    return upper;  /* n == 0 signals failure to the caller */
   }
   memcpy(x_norm, reference->x, sizeof(double) * reference->n);
   memcpy(tube_x_norm, tube_size->x, sizeof(double) * tube_size->n);
@@ -355,6 +363,10 @@ struct data getUpper(struct data *reference, struct data *tube_size) {
 				  dbuf_push(&uy, (reference->y[i] + tube_size->y[i]));
 			  }
 
+			  /* An append may have failed, in which case uy.v is still empty and
+			     the read-back below would be out of bounds. The tail of the
+			     function reports it. */
+			  if (ux.bad || uy.bad) break;
 			  int len = uy.n;
 			  double lastY = uy.v[len-1];
 			  // remove the last added points in case of zero slope of tube curve
@@ -544,6 +556,17 @@ struct data getUpper(struct data *reference, struct data *tube_size) {
           per loop removal, which is where the quadratic memory came from. */
        double* XX = removeRange(X, re_size, i, count);
        double* YY = removeRange(Y, re_size, i, count);
+       if (XX == NULL || YY == NULL) {
+         fputs("Error: Failed to allocate memory in removeLoop.\n", stderr);
+         free(XX);
+         free(YY);
+         free(X);
+         free(Y);
+         output.x = NULL;
+         output.y = NULL;
+         output.n = 0;
+         return output;
+       }
        re_size = re_size-count;
        // ===== 4. Add intersection point =====
        // add intersection point, if it isn't already there
@@ -555,6 +578,19 @@ struct data getUpper(struct data *reference, struct data *tube_size) {
             leaked the block instead of freeing it. */
          double *X_temp = insertAt(XX, re_size-1, i, ix);
          double *Y_temp = insertAt(YY, re_size-1, i, iy);
+         if (X_temp == NULL || Y_temp == NULL) {
+           fputs("Error: Failed to allocate memory in removeLoop.\n", stderr);
+           free(X_temp);
+           free(Y_temp);
+           free(XX);
+           free(YY);
+           free(X);
+           free(Y);
+           output.x = NULL;
+           output.y = NULL;
+           output.n = 0;
+           return output;
+         }
          free(XX);
          free(YY);
          XX = X_temp;
@@ -570,6 +606,19 @@ struct data getUpper(struct data *reference, struct data *tube_size) {
          /* Same pattern as the insertAt block above. */
          double *X_temp = removeAt(XX, re_size+1, i);
          double *Y_temp = removeAt(YY, re_size+1, i);
+         if (X_temp == NULL || Y_temp == NULL) {
+           fputs("Error: Failed to allocate memory in removeLoop.\n", stderr);
+           free(X_temp);
+           free(Y_temp);
+           free(XX);
+           free(YY);
+           free(X);
+           free(Y);
+           output.x = NULL;
+           output.y = NULL;
+           output.n = 0;
+           return output;
+         }
          free(XX);
          free(YY);
          XX = X_temp;
@@ -610,11 +659,12 @@ double * removeRange(double* array, int size, int staInd, int count) {
   double* updArr = malloc((size-count) * sizeof(double));
   if (updArr == NULL){
 	  fputs("Error: Failed to allocate memory for updArr.\n", stderr);
-	  exit(1);
+	  return NULL;
   }
   if (!((staInd+count) <= size)) {
     fputs("Deletion not possible!\n", stderr);
-    exit(1);
+    free(updArr);
+    return NULL;
   } else {
     for (i=0; i<staInd; i++) {
       updArr[i] = array[i];
@@ -645,11 +695,12 @@ double * removeAt(double* array, int size, int ind) {
   double* updArr = malloc((size-1) * sizeof(double));
   if (updArr == NULL){
   	  fputs("Error: Failed to allocate memory for updArr.\n", stderr);
-  	  exit(1);
+  	  return NULL;
   }
   if (ind > size-1) {
     fputs("Deletion not possible!\n", stderr);
-    exit(1);
+    free(updArr);
+    return NULL;
   } else {
     if (ind == size-1) {
       for (i=0; i<size-1; i++) {
@@ -685,11 +736,12 @@ double * insertAt(double* array, int size, int index, double item) {
   double* updArr = malloc((size+1) * sizeof(double));
   if (updArr == NULL){
 	  fputs("Error: Failed to allocate memory for updArr.\n", stderr);
-	  exit(1);
+	  return NULL;
   }
   if (index > size) {
     fputs("Insert not possible!\n", stderr);
-    exit(1);
+    free(updArr);
+    return NULL;
   } else {
     if (index == size) {
       for (i=0; i<size; i++) {

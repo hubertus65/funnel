@@ -40,7 +40,8 @@ char *buildPath(
     fname = (char*)malloc((strlen(outDir) + strlen(fileName) + 1) * sizeof(char));
 
   if (fname == NULL){
-    perror("Error: Failed to allocate memory for fname in writeToFile.");
+    perror("Error: Failed to allocate memory for fname in buildPath.");
+    return NULL;
   }
 
   strcpy(fname, outDir);
@@ -74,8 +75,9 @@ FILE *init_log(
   const char *fileName
 ) {
   char *fname = buildPath(outDir, fileName);
+  if (fname == NULL) return NULL;
   FILE *fil = fopen(fname, "w+");
-  if (fname != NULL) free(fname);
+  free(fname);
 
   if (fil == NULL){
     perror("Error: Failed to open log.\n");
@@ -102,13 +104,16 @@ int writeToFile(
   size_t i = 0;
 
   char *fname = buildPath(outDir, fileName);
+  if (fname == NULL) return -1;
   FILE *fil = fopen(fname, "w+");
-  if (fname != NULL) free(fname);
 
   if (fil == NULL){
+    /* fname used to be freed before it was printed here. */
     fprintf(log_file, "Error: Failed to open '%s' in writeToFile.\n", fname);
+    free(fname);
     return -1;
   }
+  free(fname);
 
   fprintf(fil, "%s\n", "x,y");
   for (i = 0; i < data->n; i++) {
@@ -126,21 +131,21 @@ struct data *newData(
   struct data *retVal = malloc(sizeof(struct data));
   if (retVal == NULL)
   {
-    fputs("Error: Failed to allocate memory for data.\n", log_file);
+    fputs("Error: Failed to allocate memory for data.\n", stderr);
     return NULL;
   }
   // Try to allocate vector data, free structure if fail.
 
   retVal->x = malloc(n * sizeof(double));
   if (retVal->x == NULL) {
-    fputs("Error: Failed to allocate memory for data.x.\n", log_file);
+    fputs("Error: Failed to allocate memory for data.x.\n", stderr);
     free (retVal);
     return NULL;
   }
 
   retVal->y = malloc(n * sizeof(double));
   if (retVal->y == NULL) {
-    fputs("Error: Failed to allocate memory for data.y.\n", log_file);
+    fputs("Error: Failed to allocate memory for data.y.\n", stderr);
     free (retVal->x);
     free (retVal);
     return NULL;
@@ -165,9 +170,10 @@ void setData(
 }
 
 void freeData(struct data *dat) {
+  if (dat == NULL) return;
   if (dat->x != NULL) free (dat->x);
   if (dat->y != NULL) free (dat->y);
-  if (dat != NULL) free (dat);
+  free (dat);
 }
 
 /*
@@ -202,6 +208,13 @@ int compareAndReport(
   struct data lowerCurve = {NULL, NULL, 0};
   struct data upperCurve = {NULL, NULL, 0};
   struct reports validateReport = {{{NULL, NULL, 0}, {NULL, NULL, 0}}};
+  if (baseCSV == NULL || testCSV == NULL || tube_size == NULL) {
+    fputs("Error: Failed to allocate memory for the input data.\n", stderr);
+    freeData(baseCSV);
+    freeData(testCSV);
+    freeData(tube_size);
+    return -1;
+  }
   setData(baseCSV, tReference, yReference);
   setData(testCSV, tTest, yTest);
 
@@ -210,6 +223,12 @@ int compareAndReport(
     return -1;
   }
   log_file = init_log(outputDirectory, "c_funnel.log");
+  if (log_file == NULL) {
+    /* Losing the log is not a reason to lose the comparison, but every
+       later fprintf() would dereference NULL. */
+    fputs("Error: Failed to open the log file; logging to stderr.\n", stderr);
+    log_file = stderr;
+  }
 
   if (!equ(baseCSV->x[0], testCSV->x[0])){
     fprintf(log_file, "Error: Reference and test data minimum x values are different.\n");
@@ -238,7 +257,7 @@ int compareAndReport(
   upperCurve = getUpper(baseCSV, tube_size);
 
   // Validate test curve and generate error report
-  if (lowerCurve.n == 0 || lowerCurve.n == 0){
+  if (lowerCurve.n == 0 || upperCurve.n == 0){
     fputs("Error: lower or upper curve has 0 elements.\n", log_file);
     retVal = 1;
     goto end;
@@ -291,6 +310,6 @@ int compareAndReport(
     if (validateReport.errors.original.y != NULL) free(validateReport.errors.original.y);
     if (validateReport.errors.diff.x != NULL) free(validateReport.errors.diff.x);
     if (validateReport.errors.diff.y != NULL) free(validateReport.errors.diff.y);
-    fclose(log_file);
+    if (log_file != stderr) fclose(log_file);
     return retVal;
 }
